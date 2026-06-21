@@ -450,7 +450,7 @@ async def resolve_with_playwright(input_url: str, timeout_ms: int = 45000) -> Di
     """
     try:
         from playwright.async_api import async_playwright
-        from playwright_stealth import stealth_async
+        from playwright_stealth import Stealth
     except ImportError as exc:
         return {"ok": False, "error": f"Required packages are not installed: {exc}"}
 
@@ -476,10 +476,11 @@ async def resolve_with_playwright(input_url: str, timeout_ms: int = 45000) -> Di
             timezone_id="America/New_York"
         )
         
-        page = await context.new_page()
+        # Apply the stealth evasions to the entire context (v2.0+ syntax)
+        stealth = Stealth()
+        await stealth.apply_stealth_async(context)
         
-        # Apply the stealth evasions before navigating
-        await stealth_async(page)
+        page = await context.new_page()
 
         def on_request(req):
             url = req.url
