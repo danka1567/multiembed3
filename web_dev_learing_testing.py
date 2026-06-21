@@ -38,7 +38,7 @@ STREAMINGNOW_BASE = "https://streamingnow.mov"
 DEFAULT_INPUT_URL = "https://multiembed.mov/?video_id=45050&tmdb=1"
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 
@@ -441,7 +441,7 @@ def resolve_live_raw(input_url: str, preferred_server: Optional[str] = None) -> 
 async def resolve_with_playwright(input_url: str, timeout_ms: int = 45000) -> Dict[str, Any]:
     """
     Optional advanced mode. Requires:
-        pip install playwright
+        pip install playwright playwright-stealth
         python -m playwright install chromium
 
     It records media URLs seen by a normal browser session. It does not bypass
@@ -450,17 +450,36 @@ async def resolve_with_playwright(input_url: str, timeout_ms: int = 45000) -> Di
     """
     try:
         from playwright.async_api import async_playwright
-    except Exception as exc:
-        return {"ok": False, "error": f"playwright is not installed: {exc}"}
+        from playwright_stealth import stealth_async
+    except ImportError as exc:
+        return {"ok": False, "error": f"Required packages are not installed: {exc}"}
 
     stream_urls: List[str] = []
     page_urls: List[str] = []
     started = time.time()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context(user_agent=DEFAULT_USER_AGENT)
+        # Pass arguments to hide the "Chrome is being controlled by automated software" flag
+        browser = await p.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ]
+        )
+        
+        # Add a more realistic viewport and locale to the context
+        context = await browser.new_context(
+            user_agent=DEFAULT_USER_AGENT,
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            timezone_id="America/New_York"
+        )
+        
         page = await context.new_page()
+        
+        # Apply the stealth evasions before navigating
+        await stealth_async(page)
 
         def on_request(req):
             url = req.url
@@ -469,10 +488,15 @@ async def resolve_with_playwright(input_url: str, timeout_ms: int = 45000) -> Di
                 stream_urls.append(url)
 
         page.on("request", on_request)
-        await page.goto(input_url, wait_until="domcontentloaded", timeout=timeout_ms)
-        deadline = time.time() + timeout_ms / 1000
-        while time.time() < deadline and not stream_urls:
-            await page.wait_for_timeout(1000)
+        
+        try:
+            await page.goto(input_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            deadline = time.time() + timeout_ms / 1000
+            while time.time() < deadline and not stream_urls:
+                await page.wait_for_timeout(1000)
+        except Exception as e:
+            pass # Handle timeout exceptions gracefully
+            
         await browser.close()
 
     return {
