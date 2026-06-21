@@ -459,12 +459,11 @@ async def resolve_with_nodriver(input_url: str, timeout_ms: int = 45000) -> Dict
     captured_error = None
 
     try:
-        # Added browser_args to prevent crashes in Linux CI environments
+        # Added no_sandbox=True to allow root execution in GitHub Actions
         browser = await uc.start(
             headless=False,
+            no_sandbox=True, 
             browser_args=[
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
                 '--disable-gpu',
                 '--disable-dev-shm-usage'
             ]
