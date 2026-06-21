@@ -12,7 +12,7 @@ on:
         required: false
         default: ''
       use_browser:
-        description: 'Run with Playwright (--browser)'
+        description: 'Run with nodriver (--browser)'
         type: boolean
         default: true
 
@@ -29,21 +29,20 @@ jobs:
         with:
           python-version: '3.11' 
 
-      - name: Install dependencies (Playwright & Stealth)
+      - name: Install dependencies (nodriver & system browser)
         if: ${{ inputs.use_browser == true }}
         run: |
           python -m pip install --upgrade pip
-          # Added playwright-stealth here
-          pip install playwright playwright-stealth
-          python -m playwright install chromium
-          sudo apt-get update && sudo apt-get install -y xvfb
+          pip install nodriver
+          # Install xvfb for the virtual display and chromium for nodriver to use
+          sudo apt-get update && sudo apt-get install -y xvfb chromium-browser
 
       - name: Run script (Standard HTTP/Capture Mode)
         if: ${{ inputs.use_browser == false }}
         run: |
           python web_dev_learing_testing.py "${{ inputs.url }}" ${{ inputs.args }}
 
-      - name: Run script (Browser Mode)
+      - name: Run script (Browser Mode with nodriver)
         if: ${{ inputs.use_browser == true }}
         run: |
           xvfb-run python web_dev_learing_testing.py --browser "${{ inputs.url }}" ${{ inputs.args }}
