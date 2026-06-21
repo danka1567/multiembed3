@@ -456,10 +456,19 @@ async def resolve_with_nodriver(input_url: str, timeout_ms: int = 45000) -> Dict
     page_urls: List[str] = []
     started = time.time()
     browser = None
+    captured_error = None
 
     try:
-        # uc.start() automatically manages stealth and Chrome execution
-        browser = await uc.start(headless=False)
+        # Added browser_args to prevent crashes in Linux CI environments
+        browser = await uc.start(
+            headless=False,
+            browser_args=[
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-gpu',
+                '--disable-dev-shm-usage'
+            ]
+        )
         page = await browser.get('about:blank')
 
         # Intercept network requests via Chrome DevTools Protocol
@@ -478,7 +487,8 @@ async def resolve_with_nodriver(input_url: str, timeout_ms: int = 45000) -> Dict
             await asyncio.sleep(1)
 
     except Exception as e:
-        pass  # Gracefully handle timeouts or network interruptions
+        # Capture the error so we can see it in the GitHub Actions log
+        captured_error = f"{type(e).__name__}: {str(e)}"
     finally:
         if browser:
             browser.stop()
@@ -486,6 +496,7 @@ async def resolve_with_nodriver(input_url: str, timeout_ms: int = 45000) -> Dict
     return {
         "ok": bool(stream_urls),
         "input_url": input_url,
+        "error": captured_error,
         "stream_urls": unique_keep_order(stream_urls),
         "observed_urls": unique_keep_order(page_urls),
         "elapsed_seconds": round(time.time() - started, 2),
