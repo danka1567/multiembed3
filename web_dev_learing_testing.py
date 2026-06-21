@@ -438,67 +438,50 @@ def resolve_live_raw(input_url: str, preferred_server: Optional[str] = None) -> 
         return result
 
 
-async def resolve_with_playwright(input_url: str, timeout_ms: int = 45000) -> Dict[str, Any]:
+async def resolve_with_nodriver(input_url: str, timeout_ms: int = 45000) -> Dict[str, Any]:
     """
-    Optional advanced mode. Requires:
-        pip install playwright playwright-stealth
-        python -m playwright install chromium
+    Optional advanced mode using nodriver. Requires:
+        pip install nodriver
 
-    It records media URLs seen by a normal browser session. It does not bypass
-    anti-bot challenges; if a challenge appears, solve it manually in the opened
-    browser and the collector will keep listening until timeout.
+    It records media URLs seen by a stealthy CDP-controlled browser session.
     """
     try:
-        from playwright.async_api import async_playwright
-        from playwright_stealth import Stealth
+        import nodriver as uc
     except ImportError as exc:
-        return {"ok": False, "error": f"Required packages are not installed: {exc}"}
+        return {"ok": False, "error": f"Required package is not installed: {exc}"}
+
+    import asyncio
 
     stream_urls: List[str] = []
     page_urls: List[str] = []
     started = time.time()
+    browser = None
 
-    async with async_playwright() as p:
-        # Pass arguments to hide the "Chrome is being controlled by automated software" flag
-        browser = await p.chromium.launch(
-            headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-            ]
-        )
-        
-        # Add a more realistic viewport and locale to the context
-        context = await browser.new_context(
-            user_agent=DEFAULT_USER_AGENT,
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US",
-            timezone_id="America/New_York"
-        )
-        
-        # Apply the stealth evasions to the entire context (v2.0+ syntax)
-        stealth = Stealth()
-        await stealth.apply_stealth_async(context)
-        
-        page = await context.new_page()
+    try:
+        # uc.start() automatically manages stealth and Chrome execution
+        browser = await uc.start(headless=False)
+        page = await browser.get('about:blank')
 
-        def on_request(req):
-            url = req.url
+        # Intercept network requests via Chrome DevTools Protocol
+        async def request_handler(event: uc.cdp.network.RequestWillBeSent):
+            url = event.request.url
             page_urls.append(url)
             if STREAM_URL_RE.search(url):
                 stream_urls.append(url)
 
-        page.on("request", on_request)
-        
-        try:
-            await page.goto(input_url, wait_until="domcontentloaded", timeout=timeout_ms)
-            deadline = time.time() + timeout_ms / 1000
-            while time.time() < deadline and not stream_urls:
-                await page.wait_for_timeout(1000)
-        except Exception as e:
-            pass # Handle timeout exceptions gracefully
-            
-        await browser.close()
+        page.add_handler(uc.cdp.network.RequestWillBeSent, request_handler)
+
+        await page.get(input_url)
+
+        deadline = time.time() + timeout_ms / 1000
+        while time.time() < deadline and not stream_urls:
+            await asyncio.sleep(1)
+
+    except Exception as e:
+        pass  # Gracefully handle timeouts or network interruptions
+    finally:
+        if browser:
+            browser.stop()
 
     return {
         "ok": bool(stream_urls),
@@ -628,7 +611,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--no-live", action="store_true", help="Skip live raw HTTP and only use capture files.")
     parser.add_argument("--no-capture", action="store_true", help="Skip capture fallback.")
     parser.add_argument("--server-id", default=None, help="Preferred server id, for example 89.")
-    parser.add_argument("--browser", action="store_true", help="Use optional Playwright browser collector.")
+    parser.add_argument("--browser", action="store_true", help="Use optional nodriver browser collector.")
     args = parser.parse_args(argv)
 
     if args.serve:
@@ -638,7 +621,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.browser:
         import asyncio
 
-        payload = asyncio.run(resolve_with_playwright(args.url))
+        payload = asyncio.run(resolve_with_nodriver(args.url))
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return 0 if payload.get("ok") else 2
 
